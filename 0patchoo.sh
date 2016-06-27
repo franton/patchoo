@@ -1423,11 +1423,6 @@ promptAndSetComputerName()
 
 promptProvisionInfo()
 {
-	patchoobuildeatmp="$patchootmp/patchoobuildeatmp.xml"
-	depttmp="$patchootmp/depttmp.xml"
-	buildingtmp="$patchootmp/buildingtmp.xml"
-	choicetmp="$patchootmp/choicetmp.tmp"
-
 	promptAndSetComputerName
 
 	if checkAndReadProvisionInfo
@@ -1459,23 +1454,15 @@ promptProvisionInfo()
 		patchoobuildchoicearray=$( echo $patchoobuildchoicearray | xpath //computer_extension_attribute/*/popup_choices/* 2> /dev/null )
 		patchoobuildchoicearray=$( echo $patchoobuildchoicearray | sed -e 's/<choice>//g' | sed -e $'s/<\/choice>/\\\n/g' | tr '\n' ',' )
 		patchoobuildchoicearray=$( echo $patchoobuildchoicearray | sed 's/..$//' )
-		
-		OIFS=$IFS
-		IFS=$','
-		# error checking
-		for line in "${patchoobuildchoicearray[@]}"
-		do
-			echo "$line" >> "$choicetmp"
-		done
+		OIFS=$IFS; IFS=','; BUILD_ARRAY=( $patchoobuildchoicearray ); IFS=$OIFS
 		
 		# pop up choices dialog box. strip button report as we only want the department name.
-		patchoobuildvalue=$( "$cdialogbin" dropdown --icon-file "$lockscreenlogo" --title "Deployment EA" --text "Please Choose:" --items $(< $choicetmp) --string-output --button1 "Ok" )
+		patchoobuildvalue=$( "$cdialogbin" dropdown --icon-file "$lockscreenlogo" --title "Deployment EA" --text "Please Choose:" --items "${BUILD_ARRAY[@]}" --string-output --button1 "Ok" )
 		patchoobuildvalue=$( echo $patchoobuildvalue | sed -n 2p )
-		IFS=$OIFS
+
 		
 		# error checking
 		secho "EA value: $patchoobuildvalue"
-		rm "$choicetmp"
 	fi
 
 	if [[ $pdusedepts = "true" ]];
@@ -1483,23 +1470,14 @@ promptProvisionInfo()
 		#read dept choices	
 		deptchoicearray=$(curl $curlopts -H "Accept: application/xml" -s -u ${apiuser}:${apipass} --request GET ${jssurl}JSSResource/departments | xpath //departments/department/name 2> /dev/null | sed -e 's/<name>//g' | sed -e $'s/<\/name>/\\\n/g' | tr '\n' ',')
 		deptchoicearray=$( echo $deptchoicearray | sed 's/..$//' )
+		OIFS=$IFS; IFS=','; DEPT_ARRAY=( $deptchoicearray ); IFS=$OIFS
 
-		OIFS=$IFS
-		IFS=$','
-		# error checking
-		for line in "${deptchoicearray[@]}"
-		do
-			echo "$line" >> "$choicetmp"
-		done
-		
 		# pop up choices dialog box. strip button report as we only want the department name.
-		deptvalue=$( $cdialogbin dropdown --icon-file "$lockscreenlogo" --title "Department" --text "Please Choose:" --items $(< $choicetmp) --string-output --button1 "Ok" )
+		deptvalue=$( $cdialogbin dropdown --icon-file "$lockscreenlogo" --title "Department" --text "Please Choose:" --items "${DEPT_ARRAY[@]}" --string-output --button1 "Ok" )
 		deptvalue=$( echo $deptvalue | sed -n 2p )
-		IFS=$OIFS
 		
 		# error checking
 		secho "Department value: $(echo "$deptvalue")"
-		rm "$choicetmp"
 	fi
 
 	if [[ $pdusebuildings = "true" ]];
@@ -1507,51 +1485,15 @@ promptProvisionInfo()
 		#read building choices	
 		buildingchoicearray=$(curl $curlopts -H "Accept: application/xml" -s -u ${apiuser}:${apipass} --request GET ${jssurl}JSSResource/buildings | xpath //buildings/building/name 2> /dev/null | sed -e 's/<name>//g' | sed -e $'s/<\/name>/\\\n/g' | tr '\n' ',')
 		buildingchoicearray=$( echo $buildingchoicearray | sed 's/..$//' )
-		OIFS=$IFS
-		IFS=$','
-		# error checking
-		for line in "${buildingchoicearray[@]}"
-		do
-			echo "$line" >> "$choicetmp"
-		done
+		OIFS=$IFS; IFS=','; BUILDING_ARRAY=( $buildingchoicearray ); IFS=$OIFS
 		
 		# pop up choices dialog box. strip button report as we only want the building name.
-		buildingvalue=$( $cdialogbin dropdown --icon-file "$lockscreenlogo" --title "Building" --text "Please Choose:" --items $(< $choicetmp) --string-output --button1 "Ok" )
+		buildingvalue=$( $cdialogbin dropdown --icon-file "$lockscreenlogo" --title "Building" --text "Please Choose:" --items "${BUILDING_ARRAY[@]}" --string-output --button1 "Ok" )
 		buildingvalue=$( echo $buildingvalue | sed -n 2p )
-		IFS=$OIFS
 		
 		# error checking
 		secho "Building value: $(echo "$buildingvalue" )"
-		rm "$choicetmp"
 	fi
-
-	# write out xml for put to api
-	echo "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>
-<computer>
-<extension_attributes>
-<attribute>
-<name>$pdbuildea</name>
-<value>$patchoobuildvalue</value>
-</attribute>
-</extension_attributes>
-</computer>
-" > "$patchoobuildeatmp"
-	
-	echo "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>
-<computer>
-<location>
-<department>$deptvalue</department>
-</location>
-</computer>
-" > "$depttmp"
-	
-	echo "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>
-<computer>
-<location>
-<building>$buildingvalue</building>
-</location>
-</computer>
-" > "$buildingtmp"
 
 	while true
 	do
@@ -1575,19 +1517,19 @@ promptProvisionInfo()
 
 		if $pdusebuildea
 		then
-			putresult=$(curl $curlopts -H "Accept: application/xml" -s -u "$tmpapiadminuser:$tmpapiadminpass" "${jssurl}JSSResource/computers/udid/$udid/subset/extensionattributes" -T "$patchoobuildeatmp" -X PUT | grep "requires user authentication")
+			putresult=$(curl $curlopts -H "Accept: application/xml" -s -u "$tmpapiadminuser:$tmpapiadminpass" "${jssurl}JSSResource/computers/udid/$udid/subset/extensionattributes" -D "<computer><extension_attributes><attribute><name>$pdbuildea</name><value>$patchoobuildvalue</value></attribute></extension_attributes></computer>" -X PUT | grep "requires user authentication")
 			[ "$putresult" != "" ] && retryauth=true
 		fi
 
 		if $pdusedepts
 		then
-			putresult=$(curl $curlopts -H "Accept: application/xml" -s -u "$tmpapiadminuser:$tmpapiadminpass" "${jssurl}JSSResource/computers/udid/$udid/subset/location" -T "$depttmp" -X PUT | grep "requires user authentication")
+			putresult=$(curl $curlopts -H "Accept: application/xml" -s -u "$tmpapiadminuser:$tmpapiadminpass" "${jssurl}JSSResource/computers/udid/$udid/subset/location" -D "<computer><location><department>$deptvalue</department></location></computer>" -X PUT | grep "requires user authentication")
 			[ "$putresult" != "" ] && retryauth=true
 		fi
 
 		if $pdusebuildings
 		then
-			putresult=$(curl $curlopts -H "Accept: application/xml" -s -u "$tmpapiadminuser:$tmpapiadminpass" "${jssurl}JSSResource/computers/udid/$udid/subset/location" -T "$buildingtmp" -X PUT | grep "requires user authentication")
+			putresult=$(curl $curlopts -H "Accept: application/xml" -s -u "$tmpapiadminuser:$tmpapiadminpass" "${jssurl}JSSResource/computers/udid/$udid/subset/location" -D "<computer><location><building>$buildingvalue</building></location></computer>" -X PUT | grep "requires user authentication")
 			[ "$putresult" != "" ] && retryauth=true
 		fi
 
