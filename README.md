@@ -13,6 +13,8 @@ The patchoo EA, Casper buildings and departments can now be used either individu
 
 Richard (franton).
 
+29th June 2016 - EA support is fixed.
+
 **(ex-junki)**
 
 

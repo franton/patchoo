@@ -30,14 +30,14 @@ tnotify="/Applications/Utilities/terminal-notifier.app" #please specify the appb
 jamfhelper="/Library/Application Support/JAMF/bin/jamfHelper.app/Contents/MacOS/jamfHelper"
 
 # Where's the jamf binary stored? This is for SIP compatibility.
-jb=`/usr/bin/which jamf`
+jamf_binary=`/usr/bin/which jamf`
 
- if [[ "$jb" == "" ]] && [[ -e "/usr/sbin/jamf" ]] && [[ ! -e "/usr/local/bin/jamf" ]]; then
-    jb="/usr/sbin/jamf"
+ if [[ "$jamf_binary" == "" ]] && [[ -e "/usr/sbin/jamf" ]] && [[ ! -e "/usr/local/bin/jamf" ]]; then
+    jamf_binary="/usr/sbin/jamf"
  elif [[ "$jamf_binary" == "" ]] && [[ ! -e "/usr/sbin/jamf" ]] && [[ -e "/usr/local/bin/jamf" ]]; then
-    jb="/usr/local/bin/jamf"
+    jamf_binary="/usr/local/bin/jamf"
  elif [[ "$jamf_binary" == "" ]] && [[ -e "/usr/sbin/jamf" ]] && [[ -e "/usr/local/bin/jamf" ]]; then
-    jb="/usr/local/bin/jamf"
+    jamf_binary="/usr/local/bin/jamf"
  fi
 
 # if you are using a self signed cert for you jss, tell curl to allow it.
@@ -84,7 +84,7 @@ asureleasecatalog[2]="beta"
 #
 # patchooDeploy settings
 #
-pdusebuildea="false" # isn't setting the ea on the computer record
+pdusebuildea="true"
 pdusedepts="true"
 pdusebuildings="true"
 
@@ -430,7 +430,7 @@ cachePkg()
 				# (error checking)
 				# let's run the preq policy via id
 				# this is how we chain incremental updates
-				$jb policy -id "$prereqpolicyid"
+				$jamf_binary policy -id "$prereqpolicyid"
 			fi
 		fi
 	else
@@ -641,7 +641,7 @@ installCasperPkg()
 	[ "$(cat "/Library/Application Support/JAMF/Waiting Room/$casppkg.cache.xml" | grep "<fut>true</fut>")" != "" ] && jamfinstallopts="$jamfinstallopts -fut"
 	[ "$(cat "/Library/Application Support/JAMF/Waiting Room/$casppkg.cache.xml" | grep "<feu>true</feu>")" != "" ] && jamfinstallopts="$jamfinstallopts -feu"
 	secho "jamf is installing $casppkg"
-	$jb install "$jamfinstallopts" -package "$casppkg" -path "/Library/Application Support/JAMF/Waiting Room" -target /
+	$jamf_binary install "$jamfinstallopts" -package "$casppkg" -path "/Library/Application Support/JAMF/Waiting Room" -target /
 	# (insert error checking)
 	# remove from the waiting room
 
@@ -1195,12 +1195,12 @@ jamfPolicyUpdate()
 		if [ "$groupid" != "0" ]
 		then
 			secho "jamf is firing ${updatetrigger[$groupid]} trigger ..." 
-			$jb policy -event "${updatetrigger[$groupid]}"
+			$jamf_binary policy -event "${updatetrigger[$groupid]}"
 		fi
 	fi
 	# once we've got run our group trigger, run the standard...
 	secho "jamf is firing ${updatetrigger[0]} trigger ..."
-	$jb policy -event "${updatetrigger[0]}"
+	$jamf_binary policy -event "${updatetrigger[0]}"
 
 }
 
@@ -1415,19 +1415,15 @@ promptAndSetComputerName()
 		done
 		# set the computername with scutil
 		secho "setting computername to $computername"
-		scutil --set ComputerName "$computername"
-		scutil --set LocalHostName "$computername"
-		scutil --set HostName "$computername"
+		#scutil --set ComputerName "$computername"
+		#scutil --set LocalHostName "$computername"
+		#scutil --set HostName "$computername"
+		$jamf_binary -setComputerName -name "$computername"
 	fi
 }
 
 promptProvisionInfo()
 {
-	patchoobuildeatmp="$patchootmp/patchoobuildeatmp.xml"
-	depttmp="$patchootmp/depttmp.xml"
-	buildingtmp="$patchootmp/buildingtmp.xml"
-	choicetmp="$patchootmp/choicetmp.tmp"
-
 	promptAndSetComputerName
 
 	if checkAndReadProvisionInfo
@@ -1459,23 +1455,15 @@ promptProvisionInfo()
 		patchoobuildchoicearray=$( echo $patchoobuildchoicearray | xpath //computer_extension_attribute/*/popup_choices/* 2> /dev/null )
 		patchoobuildchoicearray=$( echo $patchoobuildchoicearray | sed -e 's/<choice>//g' | sed -e $'s/<\/choice>/\\\n/g' | tr '\n' ',' )
 		patchoobuildchoicearray=$( echo $patchoobuildchoicearray | sed 's/..$//' )
-		
-		OIFS=$IFS
-		IFS=$','
-		# error checking
-		for line in "${patchoobuildchoicearray[@]}"
-		do
-			echo "$line" >> "$choicetmp"
-		done
+		OIFS=$IFS; IFS=','; BUILD_ARRAY=( $patchoobuildchoicearray ); IFS=$OIFS
 		
 		# pop up choices dialog box. strip button report as we only want the department name.
-		patchoobuildvalue=$( "$cdialogbin" dropdown --icon-file "$lockscreenlogo" --title "Deployment EA" --text "Please Choose:" --items $(< $choicetmp) --string-output --button1 "Ok" )
-		patchoobuildvalue=$( echo $patchoobuildvalue | sed -n 2p )
-		IFS=$OIFS
+		patchoobuildvalue=$( "$cdialogbin" dropdown --icon-file "$lockscreenlogo" --title "Deployment EA" --text "Please Choose:" --items "${BUILD_ARRAY[@]}" --string-output --button1 "Ok" )
+		patchoobuildvalue=$( echo $patchoobuildvalue | cut -d " " -f2- )
+
 		
 		# error checking
 		secho "EA value: $patchoobuildvalue"
-		rm "$choicetmp"
 	fi
 
 	if [[ $pdusedepts = "true" ]];
@@ -1483,23 +1471,14 @@ promptProvisionInfo()
 		#read dept choices	
 		deptchoicearray=$(curl $curlopts -H "Accept: application/xml" -s -u ${apiuser}:${apipass} --request GET ${jssurl}JSSResource/departments | xpath //departments/department/name 2> /dev/null | sed -e 's/<name>//g' | sed -e $'s/<\/name>/\\\n/g' | tr '\n' ',')
 		deptchoicearray=$( echo $deptchoicearray | sed 's/..$//' )
+		OIFS=$IFS; IFS=','; DEPT_ARRAY=( $deptchoicearray ); IFS=$OIFS
 
-		OIFS=$IFS
-		IFS=$','
-		# error checking
-		for line in "${deptchoicearray[@]}"
-		do
-			echo "$line" >> "$choicetmp"
-		done
-		
 		# pop up choices dialog box. strip button report as we only want the department name.
-		deptvalue=$( $cdialogbin dropdown --icon-file "$lockscreenlogo" --title "Department" --text "Please Choose:" --items $(< $choicetmp) --string-output --button1 "Ok" )
-		deptvalue=$( echo $deptvalue | sed -n 2p )
-		IFS=$OIFS
+		deptvalue=$( $cdialogbin dropdown --icon-file "$lockscreenlogo" --title "Department" --text "Please Choose:" --items "${DEPT_ARRAY[@]}" --string-output --button1 "Ok" )
+		deptvalue=$( echo $deptvalue | cut -d " " -f2- )
 		
 		# error checking
 		secho "Department value: $(echo "$deptvalue")"
-		rm "$choicetmp"
 	fi
 
 	if [[ $pdusebuildings = "true" ]];
@@ -1507,51 +1486,15 @@ promptProvisionInfo()
 		#read building choices	
 		buildingchoicearray=$(curl $curlopts -H "Accept: application/xml" -s -u ${apiuser}:${apipass} --request GET ${jssurl}JSSResource/buildings | xpath //buildings/building/name 2> /dev/null | sed -e 's/<name>//g' | sed -e $'s/<\/name>/\\\n/g' | tr '\n' ',')
 		buildingchoicearray=$( echo $buildingchoicearray | sed 's/..$//' )
-		OIFS=$IFS
-		IFS=$','
-		# error checking
-		for line in "${buildingchoicearray[@]}"
-		do
-			echo "$line" >> "$choicetmp"
-		done
+		OIFS=$IFS; IFS=','; BUILDING_ARRAY=( $buildingchoicearray ); IFS=$OIFS
 		
 		# pop up choices dialog box. strip button report as we only want the building name.
-		buildingvalue=$( $cdialogbin dropdown --icon-file "$lockscreenlogo" --title "Building" --text "Please Choose:" --items $(< $choicetmp) --string-output --button1 "Ok" )
-		buildingvalue=$( echo $buildingvalue | sed -n 2p )
-		IFS=$OIFS
+		buildingvalue=$( $cdialogbin dropdown --icon-file "$lockscreenlogo" --title "Building" --text "Please Choose:" --items "${BUILDING_ARRAY[@]}" --string-output --button1 "Ok" )
+		buildingvalue=$( echo $buildingvalue | cut -d " " -f2- )
 		
 		# error checking
 		secho "Building value: $(echo "$buildingvalue" )"
-		rm "$choicetmp"
 	fi
-
-	# write out xml for put to api
-	echo "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>
-<computer>
-<extension_attributes>
-<attribute>
-<name>$pdbuildea</name>
-<value>$patchoobuildvalue</value>
-</attribute>
-</extension_attributes>
-</computer>
-" > "$patchoobuildeatmp"
-	
-	echo "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>
-<computer>
-<location>
-<department>$deptvalue</department>
-</location>
-</computer>
-" > "$depttmp"
-	
-	echo "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"no\"?>
-<computer>
-<location>
-<building>$buildingvalue</building>
-</location>
-</computer>
-" > "$buildingtmp"
 
 	while true
 	do
@@ -1575,19 +1518,19 @@ promptProvisionInfo()
 
 		if $pdusebuildea
 		then
-			putresult=$(curl $curlopts -H "Accept: application/xml" -s -u "$tmpapiadminuser:$tmpapiadminpass" "${jssurl}JSSResource/computers/udid/$udid/subset/extensionattributes" -T "$patchoobuildeatmp" -X PUT | grep "requires user authentication")
+			putresult=$(curl $curlopts "${jssurl}JSSResource/computers/udid/$udid" --user "$tmpapiadminuser:$tmpapiadminpass" --silent -H "Content-Type: text/xml" -X PUT -d "<computer><extension_attributes><extension_attribute><name>$pdbuildea</name><value>$patchoobuildvalue</value></extension_attribute></extension_attributes></computer>" | grep "requires user authentication")
 			[ "$putresult" != "" ] && retryauth=true
 		fi
 
 		if $pdusedepts
 		then
-			putresult=$(curl $curlopts -H "Accept: application/xml" -s -u "$tmpapiadminuser:$tmpapiadminpass" "${jssurl}JSSResource/computers/udid/$udid/subset/location" -T "$depttmp" -X PUT | grep "requires user authentication")
+			putresult=$(curl $curlopts "${jssurl}JSSResource/computers/udid/$udid" --user "$tmpapiadminuser:$tmpapiadminpass" --silent -H "Content-Type: text/xml" -X PUT -d "<computer><location><department>$deptvalue</department></location></computer>" | grep "requires user authentication")
 			[ "$putresult" != "" ] && retryauth=true
 		fi
 
 		if $pdusebuildings
 		then
-			putresult=$(curl $curlopts -H "Accept: application/xml" -s -u "$tmpapiadminuser:$tmpapiadminpass" "${jssurl}JSSResource/computers/udid/$udid/subset/location" -T "$buildingtmp" -X PUT | grep "requires user authentication")
+			putresult=$(curl $curlopts "${jssurl}JSSResource/computers/udid/$udid" --user "$tmpapiadminuser:$tmpapiadminpass" --silent -H "Content-Type: text/xml" -X PUT -d "<computer><location><building>$buildingvalue</building></location></computer>" | grep "requires user authentication")
 			[ "$putresult" != "" ] && retryauth=true
 		fi
 
@@ -1666,26 +1609,26 @@ deployHandler()
 	
 	# run recurring trigger before we start deploy, in case we have stuff we need to do on that - once per computer etc.
 	secho "firing recurring checkin trigger ..."
-	$jb policy
+	$jamf_binary policy
 	secho "firing deploy trigger ..."
-	$jb policy -event "deploy"
+	$jamf_binary policy -event "deploy"
 	
 	if $pdusebuildea
 	then
 		secho "firing deploy-${patchoobuild} trigger ..."
-		$jb policy -event "deploy-${patchoobuild}"	# calling our build specific trigger eg. deploy-management, deploy-studio
+		$jamf_binary policy -event "deploy-${patchoobuild}"	# calling our build specific trigger eg. deploy-management, deploy-studio
 	fi
 	
 	if $department
 	then
 		secho "firing deploy-${department} trigger ..."
-		$jb policy -event "deploy-${department}"	# calling our build specific trigger eg. deploy-management, deploy-studio
+		$jamf_binary policy -event "deploy-${department}"	# calling our build specific trigger eg. deploy-management, deploy-studio
 	fi
 	
 	if $building
 	then
 		secho "firing deploy-${building} trigger ..."
-		$jb policy -event "deploy-${building}"		# calling our build specific trigger eg. deploy-management, deploy-studio
+		$jamf_binary policy -event "deploy-${building}"		# calling our build specific trigger eg. deploy-management, deploy-studio
 	fi
 	
 	installsavail=$(defaults read "$prefs" InstallsAvail  2> /dev/null)  # are installations cached by patchoo polcies, during our deploy?
@@ -1717,11 +1660,11 @@ deployGroup()
 			if [ "$policyid" != "" ]
 			then
 				secho "jamf calling policy id $policyid"
-				$jb policy -id "$policyid"
+				$jamf_binary policy -id "$policyid"
 			else
 				# if there's no id, lets call a trigger
 				secho "jamf firing trigger $triggerorpolicy"
-				$jb policy -event "$(echo "$triggerorpolicy" | sed -e 's/ /\_/g')"
+				$jamf_binary policy -event "$(echo "$triggerorpolicy" | sed -e 's/ /\_/g')"
 			fi
 		fi
 	done
@@ -1837,7 +1780,7 @@ bootstrapHelper()
 	killall jamfHelper
 
 	# trigger the bootstrap policy
-	$jb policy -event "bootstrap" &
+	$jamf_binary policy -event "bootstrap" &
 
 	# these messages will be ignored in the jamf.log, the previous entry will be displayed at the lockscreen
 	ignoremessages=("The management framework will be enforced" "Checking for policies triggered by")
@@ -1880,9 +1823,9 @@ jamfRecon()
 	secho "jamf is running a recon ..."
 	if [ "$1" == "--feedback" ]
 	then
-		( $jb recon ) | "$cdialogbin" progressbar --icon sync --float --indeterminate --title "Casper Recon" --text "Updating computer inventory..."  --icon-height "$iconsize" --icon-width "$iconsize" --width "500" --height "114" 
+		( $jamf_binary recon ) | "$cdialogbin" progressbar --icon sync --float --indeterminate --title "Casper Recon" --text "Updating computer inventory..."  --icon-height "$iconsize" --icon-width "$iconsize" --width "500" --height "114" 
 	else
-		$jb recon
+		$jamf_binary recon
 	fi		
 	# if there is flag, remove it
 	[ -f "$datafolder/.patchoo-recon-required" ] && rm "$datafolder/.patchoo-recon-required"
